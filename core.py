@@ -241,7 +241,23 @@ class ConnectionContext:
             if protocol:
                 ctx.minimum_version = protocol
                 ctx.maximum_version = protocol
-            with self.tls_connection(ctx):
+            # Explicitly allow old protocols
+            ctx.options &= ~ssl.OP_NO_SSLv3
+            ctx.options &= ~ssl.OP_NO_TLSv1
+            ctx.options &= ~ssl.OP_NO_TLSv1_1
+            # CHANGE: Capture the socket as 'ssl_sock'
+            with self.tls_connection(ctx) as ssl_sock:
+                # Ask: "What cipher are we ACTUALLY using?"
+                negotiated = ssl_sock.cipher()[0]
+                # If we asked for NULL/aNULL, verify we got it
+                if cipher in ["NULL", "aNULL"]:
+                    if "NULL" not in negotiated:
+                        return False # OS upgraded us to strong encryption            
+                # If we asked for a specific string (e.g. "RC4"), verify it's in the name
+                # Exception: "kRSA" is a mechanism, not a name, so we skip name check for it
+                elif cipher != "kRSA" and cipher not in negotiated:
+                    return False # OS upgraded us to AES/Chacha
+                
                 return True
         except Exception:
             return False
@@ -464,3 +480,65 @@ class TLSScannerCore:
             failed_checks=len(errors),
             errors=errors
         )
+
+
+# ============================================
+# CHECKS IMPLEMENTATION
+# ============================================
+
+class CipherConfigurationCheck(BaseCheck):
+    """
+    Checks for weak or misconfigured cipher suites, including:
+    - Legacy Ciphers (RC4, 3DES, NULL)
+    - Forward Secrecy support (Static RSA detection)
+    - Anonymous authentication (Man-in-the-Middle risk)
+    """  
+    def run(self, context: ConnectionContext) -> List[Finding]:
+        findings = []
+        weak_targets = [
+            # --- CRITICAL (No Encryption / No Auth) ---
+            ("NULL", "NULL", Severity.CRITICAL),      # No encryption
+            ("ADH", "ADH", Severity.CRITICAL),        # Anonymous DH (No Authentication)
+            ("AECDH", "AECDH", Severity.CRITICAL),    # Anonymous ECDH (No Authentication)
+            ("EXPORT", "EXP", Severity.CRITICAL),     # Export-grade (40-bit keys, trivially breakable)
+            # --- HIGH (Broken / Obsolete) ---
+            ("RC4", "RC4", Severity.HIGH),            # Biased stream cipher (broken)
+            ("RC2", "RC2", Severity.HIGH),            # Ancient block cipher
+            ("DES", "DES", Severity.HIGH),            # Single DES (56-bit, broken)
+            # --- MEDIUM (Weak / Deprecated) ---
+            ("3DES", "3DES", Severity.MEDIUM),        # Triple-DES (Sweet32 vulnerability, slow)
+            ("SEED", "SEED", Severity.MEDIUM),        # Old Korean cipher (deprecated)
+            ("IDEA", "IDEA", Severity.MEDIUM),        # Old cipher (deprecated)
+            ("CAMELLIA", "CAMELLIA", Severity.MEDIUM),# Not strictly broken, but rare/non-standard now
+        ]
+        for name, cipher_str, severity in weak_targets:
+            if context.test_cipher_suite(cipher_str):
+                 findings.append(self.create_finding(
+                    severity=severity,
+                    title=f"Weak Cipher Supported: {name}",
+                    description=f"The server supports the obsolete {name} cipher suite.",
+                    remediation=f"Disable {name} in the server configuration.",
+                    metadata={"cipher_string": cipher_str}
+                ))
+        # 2. Static RSA (No Forward Secrecy)
+        # "kRSA" in OpenSSL selects cipher suites using Static RSA Key Exchange
+        if context.test_cipher_suite("kRSA"):
+             findings.append(self.create_finding(
+                severity=Severity.MEDIUM,
+                title="No Forward Secrecy (Static RSA)",
+                description="The server supports Static RSA key exchange. If the private key is stolen, past traffic can be decrypted.",
+                remediation="Prioritize ECDHE or DHE cipher suites.",
+                metadata={"cipher_string": "kRSA"}
+            ))
+        # 3. Anonymous Ciphers (aNULL)
+        # Encryption without authentication
+        if context.test_cipher_suite("aNULL"):
+             findings.append(self.create_finding(
+                severity=Severity.CRITICAL,
+                title="Anonymous Cipher Suites Supported",
+                description="The server supports cipher suites with no authentication (aNULL).",
+                remediation="Disable anonymous cipher suites immediately.",
+                metadata={"cipher_string": "aNULL"}
+            ))
+        return findings
+
