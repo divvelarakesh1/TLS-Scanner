@@ -690,6 +690,7 @@ class DeepCertificateAnalysisCheck(BaseCheck):
 
         return findings
 
+
 class ProtocolSupportCheck(BaseCheck):
     """
     Checks for protocol version support, including:
@@ -697,7 +698,7 @@ class ProtocolSupportCheck(BaseCheck):
     - Fallback SCSV (TLS_FALLBACK_SCSV) detection
     """
 
-    OPENSSL_TIMEOUT = 8
+    OPENSSL_TIMEOUT = 20
 
     def __init__(self):
         super().__init__()
@@ -825,18 +826,37 @@ class ProtocolSupportCheck(BaseCheck):
         Returns (ok, output). ok is True when we heuristically believe the TLS handshake succeeded.
         May raise FileNotFoundError if openssl not installed or subprocess.TimeoutExpired on timeout.
         """
-        cmd = ["openssl", "s_client", "-connect", f"{host}:{port}", openssl_flag, "-servername", host, "-verify", "0"]
+        cmd = ["openssl", "s_client", f"-connect", f"{host}:{port}", openssl_flag, "-servername", host, "-cipher", "DEFAULT@SECLEVEL=0"]
         proc = subprocess.run(cmd, capture_output=True, timeout=timeout, text=True)
         out = (proc.stdout or "") + "\n" + (proc.stderr or "")
         lower = out.lower()
 
-        if proc.returncode == 0:
-            if ("verify return code: 0 (ok)" in lower) or ("cipher is" in lower) or ("connected(" in lower) or ("ssl handshake has read" in lower):
-                return True, out
-            return True, out
+        failure_indicators = [
+            "inappropriate fallback", 
+            "handshake failure",
+            "no protocols available",
+            "no cipher suites in common",
+            "connection refused",
+            "wrong version number",
+            "sslv3 alert handshake failure",
+        ]
+        for indicator in failure_indicators:
+            if indicator in lower:
+                return False, out
 
-        if ("handshake failure" in lower) or ("sslv3 alert handshake failure" in lower) or ("no protocols available" in lower):
-            return False, out
+        if proc.returncode == 0:
+            success_indicators = [
+                "verify return code: 0 (ok)",
+                "cipher is",
+                "connected(",
+                "ssl handshake has read",
+                "certificate chain",
+                "server certificate"
+            ]
+            for indicator in success_indicators:
+                if indicator in lower:
+                    return True, out
+            return True, out
 
         return False, out
 
@@ -907,8 +927,7 @@ class ProtocolSupportCheck(BaseCheck):
             protocol_flag,
             "-servername",
             host,
-            "-verify",
-            "0",
+            "-cipher", "DEFAULT@SECLEVEL=0"
         ]
         if use_scsv:
             cmd_parts.append("-fallback_scsv")
@@ -916,7 +935,7 @@ class ProtocolSupportCheck(BaseCheck):
         try:
             proc = subprocess.run(
                 cmd_parts,
-                input="",
+                input="Q\n",
                 capture_output=True,
                 timeout=self.OPENSSL_TIMEOUT,
                 text=True,
@@ -941,6 +960,9 @@ class ProtocolSupportCheck(BaseCheck):
                 "cipher is",
                 "ssl handshake has read",
                 "new, ",
+                "verification: ok",           # New OpenSSL 3.0 success indicator
+                "cipher:",                    # New OpenSSL 3.0 format
+                "certificate chain",
             ]
             for indicator in success_indicators:
                 if indicator in out_lower:
