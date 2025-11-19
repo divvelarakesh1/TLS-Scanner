@@ -2,12 +2,15 @@ import ssl
 import socket
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from enum import Enum
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 import traceback
 from OpenSSL import SSL, crypto
+import subprocess
+import shutil
+
 
 
 class Severity(Enum):
