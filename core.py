@@ -10,6 +10,7 @@ import traceback
 from OpenSSL import SSL, crypto
 import subprocess
 import shutil
+import re
 
 
 
@@ -68,6 +69,34 @@ class Certificate:
     def days_until_expiry(self) -> int:
         delta = self.not_after - datetime.now()
         return delta.days
+    
+@dataclass
+class DelegatedCredential:
+    pem: str
+    algorithm: str
+    not_before: datetime
+    not_after: datetime
+    public_key_algorithm: str
+    key_size: int
+    signature_algorithm: str
+    
+    @property
+    def is_expired(self) -> bool:
+        return datetime.now() > self.not_after
+    
+    @property
+    def is_not_yet_valid(self) -> bool:
+        return datetime.now() < self.not_before
+    
+    @property
+    def days_until_expiry(self) -> int:
+        delta = self.not_after - datetime.now()
+        return delta.days
+    
+    @property
+    def total_lifetime_hours(self) -> float:
+        delta = self.not_after - self.not_before
+        return delta.total_seconds() / 3600
 
 class ConnectionContext:
     def __init__(self, target: ScanTarget, config: 'ScannerConfig'):
@@ -339,6 +368,223 @@ class ConnectionContext:
             except:
                 pass
             raise
+
+    def get_delegated_credential(self) -> Optional[DelegatedCredential]:
+        try:
+            if not shutil.which("openssl"):
+                return None
+                
+            cmd = [
+                "openssl", "s_client",
+                "-connect", f"{self.target.hostname}:{self.target.port}",
+                "-tls1_3", 
+                "-servername", self.target.effective_sni,
+                "-delegated_credential", "1",
+                "-msg",
+                "-brief"
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                input="Q\n"
+            )
+            
+            output = result.stdout + result.stderr
+            
+            dc_info = self._parse_dc_from_openssl_output(output)
+            if not dc_info or not dc_info.get("found", False):
+                return None
+                
+            return DelegatedCredential(
+                pem=dc_info.get("pem", ""),
+                algorithm=dc_info.get("algorithm", "unknown"),
+                not_before=dc_info.get("not_before", datetime.now()),
+                not_after=dc_info.get("not_after", datetime.now()),
+                public_key_algorithm=dc_info.get("public_key_algorithm", "unknown"),
+                key_size=dc_info.get("key_size", 0),
+                signature_algorithm=dc_info.get("signature_algorithm", "unknown")
+            )
+            
+        except Exception:
+            return None
+
+    def _parse_dc_from_openssl_output(self, output: str) -> Optional[Dict[str, Any]]:
+        
+        if "delegated credential" not in output.lower():
+            return {"found": False}
+        
+        dc_info = {"found": True}
+        
+        validity_match = re.search(r'Valid from:\s*(\w+\s+\d+\s+\d+:\d+:\d+\s+\d+\s+\w+)\s+until:\s*(\w+\s+\d+\s+\d+:\d+:\d+\s+\d+\s+\w+)', output)
+        if validity_match:
+            try:
+                date_formats = [
+                    "%b %d %H:%M:%S %Y %Z",
+                    "%Y-%m-%d %H:%M:%S",
+                ]
+                
+                not_before_str = validity_match.group(1).strip()
+                not_after_str = validity_match.group(2).strip()
+                
+                not_before = None
+                not_after = None
+                
+                for fmt in date_formats:
+                    try:
+                        not_before = datetime.strptime(not_before_str, fmt)
+                        not_after = datetime.strptime(not_after_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                
+                if not_before and not_after:
+                    dc_info["not_before"] = not_before
+                    dc_info["not_after"] = not_after
+            except Exception:
+                pass
+        
+        algo_match = re.search(r'signature algorithm:\s*([^\n,]+)', output, re.IGNORECASE)
+        if algo_match:
+            dc_info["signature_algorithm"] = algo_match.group(1).strip()
+        
+        key_match = re.search(r'Public Key Algorithm:\s*([^\n,]+)', output, re.IGNORECASE)
+        if key_match:
+            dc_info["public_key_algorithm"] = key_match.group(1).strip()
+        
+        size_match = re.search(r'(\d+)\s*bit', output)
+        if size_match:
+            dc_info["key_size"] = int(size_match.group(1))
+        
+        return dc_info
+
+    def supports_delegated_credentials(self) -> bool:
+
+        try:
+            if not shutil.which("openssl"):
+                return False
+                
+            cmd = [
+                "openssl", "s_client",
+                "-connect", f"{self.target.hostname}:{self.target.port}",
+                "-tls1_3", 
+                "-servername", self.target.effective_sni,
+                "-delegated_credential", "1",
+                "-brief" 
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                input="Q\n"
+            )
+            
+            output = result.stdout + result.stderr
+            
+            dc_indicators = [
+                "delegated credential",
+                "dc=",
+                "using delegated credential"
+            ]
+            
+            return any(indicator in output.lower() for indicator in dc_indicators)
+            
+        except Exception:
+            return False
+
+    def test_dc_with_openssl(self) -> Optional[Dict[str, Any]]:
+        try:
+            if not shutil.which("openssl"):
+                return None
+            
+            cmd = [
+                "openssl", "s_client",
+                "-connect", f"{self.target.hostname}:{self.target.port}",
+                "-tls1_3", 
+                "-servername", self.target.effective_sni,
+                "-delegated_credential", "1",
+                "-msg"
+            ]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                input="Q\n"
+            )
+            
+            output = result.stdout + result.stderr
+            return self._parse_comprehensive_dc_info(output)
+            
+        except Exception:
+            return None
+
+    def _parse_comprehensive_dc_info(self, output: str) -> Dict[str, Any]:
+        dc_info = {
+            "supported": False,
+            "validity_parsed": False,
+            "algorithm_parsed": False,
+            "signature_algorithm": "unknown"
+        }
+        
+        if "delegated credential" in output.lower() or "dc=" in output.lower():
+            dc_info["supported"] = True
+        
+        if not dc_info["supported"]:
+            return dc_info
+
+        date_patterns = [
+            r'not before:\s*([^\n]+)\n\s*not after:\s*([^\n]+)',
+            r'valid from:\s*([^\n]+)\s+until:\s*([^\n]+)',
+        ]
+
+        found_dates = []
+        for pattern in date_patterns:
+            matches = re.findall(pattern, output, re.IGNORECASE)
+            for m in matches:
+                nb, na = self._parse_dc_dates(m[0], m[1])
+                if nb and na:
+                    found_dates.append((nb, na))
+
+        if found_dates:
+            best_pair = min(found_dates, key=lambda p: (p[1] - p[0]).total_seconds())
+            
+            dc_info["not_before"] = best_pair[0]
+            dc_info["not_after"] = best_pair[1]
+            dc_info["validity_parsed"] = True
+            
+            dc_info["lifetime_hours"] = (best_pair[1] - best_pair[0]).total_seconds() / 3600
+            now = datetime.now()
+            dc_info["is_expired"] = now > best_pair[1]
+            dc_info["is_not_yet_valid"] = now < best_pair[0]
+
+        algo_matches = re.findall(r'signature algorithm:\s*([^\n,]+)', output, re.IGNORECASE)
+        if algo_matches:
+            dc_info["signature_algorithm"] = algo_matches[-1].strip()
+            dc_info["algorithm_parsed"] = True
+
+        return dc_info
+
+    def _parse_dc_dates(self, not_before_str: str, not_after_str: str) -> tuple:
+        date_formats = [
+            "%b %d %H:%M:%S %Y %Z",
+            "%Y-%m-%d %H:%M:%S", 
+            "%d-%b-%Y %H:%M:%S", 
+            "%b %d %Y %H:%M:%S", 
+        ]
+        for fmt in date_formats:
+            try:
+                nb = datetime.strptime(not_before_str.strip(), fmt)
+                na = datetime.strptime(not_after_str.strip(), fmt)
+                return nb, na
+            except ValueError:
+                continue
+        return None, None
 
 
 # ---------------------------
@@ -982,3 +1228,98 @@ class ProtocolSupportCheck(BaseCheck):
             return None
         except Exception:
             return None
+        
+
+class DelegatedCredentialsCheck(BaseCheck):
+    """
+    Delegated credentials checks including:
+    - Expired delegated credentials
+    - Excessive DC lifetime (beyond recommended limits) 
+    - Weak DC signature algorithms
+    """
+    
+    MAX_RECOMMENDED_LIFETIME_HOURS = 7 * 24
+    
+    def run(self, context: ConnectionContext) -> List[Finding]:
+        findings = []
+        
+        # Check 1: Basic DC support
+        if not context.supports_delegated_credentials():
+            findings.append(self.create_finding(
+                severity=Severity.INFO,
+                title="Delegated Credentials Not Supported",
+                description="The server does not support TLS 1.3 Delegated Credentials.",
+                remediation="Consider implementing DC for improved certificate management.",
+            ))
+            return findings
+        
+        # Check 2: Get detailed DC information
+        dc_info = context.test_dc_with_openssl()
+        if not dc_info or not dc_info.get("supported", False):
+            findings.append(self.create_finding(
+                severity=Severity.INFO,
+                title="Delegated Credentials Not Offered",
+                description="Server supports DC extension but did not serve one during handshake.",
+            ))
+            return findings
+        
+        # Check 3: DC Validity Period Analysis
+        self._check_dc_validity(findings, dc_info)
+        
+        # Check 4: Weak Signature Algorithms
+        self._check_dc_algorithms(findings, dc_info)
+        
+        
+        if not any(f.severity in [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM] for f in findings):
+            findings.append(self.create_finding(
+                severity=Severity.INFO,
+                title="Properly Configured Delegated Credential",
+                description=f"Delegated credential is valid (Lifetime: {dc_info.get('lifetime_hours', 0):.1f}h).",
+            ))
+        
+        return findings
+    
+    def _check_dc_validity(self, findings: List[Finding], dc_info: Dict[str, Any]):
+        if not dc_info.get("validity_parsed", False):
+            findings.append(self.create_finding(
+                severity=Severity.LOW,
+                title="Delegated Credential Validity Unclear",
+                description="Could not parse the delegated credential's validity period (Regex mismatch).",
+                remediation="Verify OpenSSL output format.",
+            ))
+            return
+        
+        if dc_info.get("is_expired", False):
+            findings.append(self.create_finding(
+                severity=Severity.CRITICAL,
+                title="Expired Delegated Credential",
+                description=f"Delegated credential expired on {dc_info['not_after']}.",
+                remediation="Rotate delegated credential immediately.",
+                metadata={"expiry": str(dc_info['not_after'])}
+            ))
+        
+        elif dc_info.get("lifetime_hours", 0) > self.MAX_RECOMMENDED_LIFETIME_HOURS:
+            findings.append(self.create_finding(
+                severity=Severity.MEDIUM,
+                title="Excessive Delegated Credential Lifetime",
+                description=f"DC lifetime is {dc_info['lifetime_hours']:.1f} hours (Max recommended: {self.MAX_RECOMMENDED_LIFETIME_HOURS}h).",
+                remediation="Reduce DC lifetime (RFC 9345 recommends < 7 days).",
+            ))
+
+    def _check_dc_algorithms(self, findings: List[Finding], dc_info: Dict[str, Any]):
+        if not dc_info.get("algorithm_parsed", False):
+            return
+        
+        signature_algo = dc_info.get("signature_algorithm", "").lower()
+        weak_algos = ["sha1", "md5", "rsa-pkcs1-sha1"]
+        
+        for weak_algo in weak_algos:
+            if weak_algo in signature_algo:
+                findings.append(self.create_finding(
+                    severity=Severity.HIGH,
+                    title="Weak Delegated Credential Signature Algorithm",
+                    description=f"Delegated credential uses weak signature algorithm: {signature_algo}",
+                    remediation="Use ECDSA (P-256) or RSA-PSS.",
+                    metadata={"algorithm": signature_algo}
+                ))
+                break
