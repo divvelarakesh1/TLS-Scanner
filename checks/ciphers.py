@@ -16,16 +16,13 @@ class CipherConfigurationCheck(BaseCheck):
     def run(self, context: ConnectionContext) -> List[Finding]:
         findings = []
         weak_targets = [
-            # --- CRITICAL (No Encryption / No Auth) ---
             ("NULL", "NULL", Severity.CRITICAL),      # No encryption
             ("ADH", "ADH", Severity.CRITICAL),        # Anonymous DH (No Authentication)
             ("AECDH", "AECDH", Severity.CRITICAL),    # Anonymous ECDH (No Authentication)
             ("EXPORT", "EXP", Severity.CRITICAL),     # Export-grade (40-bit keys, trivially breakable)
-            # --- HIGH (Broken / Obsolete) ---
             ("RC4", "RC4", Severity.HIGH),            # Biased stream cipher (broken)
             ("RC2", "RC2", Severity.HIGH),            # Ancient block cipher
             ("DES", "DES", Severity.HIGH),            # Single DES (56-bit, broken)
-            # --- MEDIUM (Weak / Deprecated) ---
             ("3DES", "3DES", Severity.MEDIUM),        # Triple-DES (Sweet32 vulnerability, slow)
             ("SEED", "SEED", Severity.MEDIUM),        # Old Korean cipher (deprecated)
             ("IDEA", "IDEA", Severity.MEDIUM),        # Old cipher (deprecated)
@@ -73,7 +70,6 @@ class SessionTicketCheck(BaseCheck):
     def run(self, context: ConnectionContext) -> List[Finding]:
         findings = []
         
-        # This check requires the 'openssl' binary to parse raw ticket fields
         if not shutil.which("openssl"):
             findings.append(self.create_finding(
                 severity=Severity.INFO,
@@ -82,7 +78,6 @@ class SessionTicketCheck(BaseCheck):
             ))
             return findings
 
-        # --- Step 1: Analyze First Connection ---
         ticket_info_1 = self._analyze_ticket(context)
         
         if not ticket_info_1.get("supported", False):
@@ -91,15 +86,10 @@ class SessionTicketCheck(BaseCheck):
                 title="Session Tickets Not Supported",
                 description="Server does not issue stateless session tickets.",
             ))
-            # If not supported, we can't test for misuse
             return findings
 
-        # --- Step 2: Check Key Rotation (Lifetime Hint) ---
-        # The server sends a 'hint' for how long the ticket is valid.
-        # If this is too long (e.g., months), it implies the STEK is not rotated often.
         lifetime = ticket_info_1.get("lifetime_hint", 0)
         
-        # Thresholds: > 7 days (High Risk), > 1 day (Medium Risk)
         if lifetime > 604800: 
             findings.append(self.create_finding(
                 severity=Severity.HIGH,
@@ -122,12 +112,6 @@ class SessionTicketCheck(BaseCheck):
                 title="Session Ticket Lifetime OK",
                 description=f"Ticket lifetime hint is {lifetime} seconds ({lifetime/3600:.1f} hours).",
             ))
-
-        # --- Step 3: Check Entropy (Static Ticket Detection) ---
-        # 
-        # We connect a SECOND time. 
-        # A secure server MUST issue a different ticket (new IV, new HMAC) for every connection.
-        # If the binary blob is identical, the server has broken randomness.
         
         ticket_info_2 = self._analyze_ticket(context)
         
@@ -157,8 +141,6 @@ class SessionTicketCheck(BaseCheck):
         result_info = {"supported": False, "lifetime_hint": 0, "ticket_hex": ""}
         
         try:
-            # Command: openssl s_client -connect host:port ...
-            # We disable SSLv3/TLS1 to ensure we get modern ticket structures if possible
             cmd = [
                 "openssl", "s_client",
                 "-connect", f"{context.target.hostname}:{context.target.port}",
@@ -166,10 +148,9 @@ class SessionTicketCheck(BaseCheck):
                 "-no_ssl3", "-no_tls1", 
             ]
             
-            # Run with timeout
             proc = subprocess.run(
                 cmd, 
-                input="Q\n", # Send 'Q' to quit immediately after handshake
+                input="Q\n", 
                 capture_output=True, 
                 text=True, 
                 timeout=10
@@ -177,34 +158,21 @@ class SessionTicketCheck(BaseCheck):
             
             output = proc.stdout + proc.stderr
             
-            # 1. Check if a ticket was actually received
-            # OpenSSL output varies: "Post-Handshake New Session Ticket arrived" (TLS 1.3) or "TLS session ticket:" (TLS 1.2)
             if "Post-Handshake New Session Ticket arrived" in output or "TLS session ticket:" in output:
                 result_info["supported"] = True
                 
-            # 2. Extract Lifetime Hint
-            # Example output: "TLS session ticket lifetime hint: 7200 (seconds)"
             hint_match = re.search(r'lifetime hint[:\s]*(\d+)', output, re.IGNORECASE)
             if hint_match:
                 result_info["lifetime_hint"] = int(hint_match.group(1))
-                # If we see a hint, it definitely supports tickets
                 result_info["supported"] = True
 
-            # 3. Extract Raw Ticket Hex (For Entropy Check)
-            # OpenSSL dumps the ticket in a hex block like:
-            # 0000 - fc 23 11 ...
-            # 0010 - ab cd ef ...
             if "TLS session ticket:" in output:
-                # Find where the ticket dump starts
                 start_idx = output.find("TLS session ticket:")
-                # Grab a chunk of text after that
                 chunk = output[start_idx:start_idx+2000]
                 
-                # Regex to match the hex dump lines (e.g., " 0010 - AE 4F ...")
                 hex_lines = re.findall(r'^\s*[0-9a-f]{4}\s-\s([0-9a-f\s]+)', chunk, re.MULTILINE)
                 
                 if hex_lines:
-                    # Combine lines and remove spaces to get a pure hex string
                     raw_hex = "".join(hex_lines).replace(" ", "")
                     result_info["ticket_hex"] = raw_hex
 
