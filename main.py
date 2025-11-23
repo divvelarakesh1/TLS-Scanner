@@ -16,7 +16,7 @@ if __name__ == "__main__":
     scanner.register_check(DelegatedCredentialsCheck())
     scanner.register_check(SessionTicketCheck())
     
-    target = ScanTarget(hostname="www.google.com", port=443)
+    target = ScanTarget(hostname="www.github.com", port=443)
     
     print(f"[*] Scanning {target.hostname}:{target.port}...")
     result = scanner.scan(target)

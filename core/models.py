@@ -84,3 +84,30 @@ class ScanResult:
 
     def get_findings_by_severity(self, severity: Severity) -> List[Finding]:
         return [f for f in self.findings if f.severity == severity]
+@dataclass
+class DelegatedCredential:
+    pem: str
+    algorithm: str
+    not_before: datetime
+    not_after: datetime
+    public_key_algorithm: str
+    key_size: int
+    signature_algorithm: str
+    
+    @property
+    def is_expired(self) -> bool:
+        return datetime.now() > self.not_after
+    
+    @property
+    def is_not_yet_valid(self) -> bool:
+        return datetime.now() < self.not_before
+    
+    @property
+    def days_until_expiry(self) -> int:
+        delta = self.not_after - datetime.now()
+        return delta.days
+    
+    @property
+    def total_lifetime_hours(self) -> float:
+        delta = self.not_after - self.not_before
+        return delta.total_seconds() / 3600
