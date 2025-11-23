@@ -1,3 +1,4 @@
+```
 TLS-Scanner/
 ├── checks/
 │   ├── certificates.py
@@ -17,3 +18,4 @@ TLS-Scanner/
 ├── benchmark.py
 ├── main.py
 └── requirements.txt
+```
