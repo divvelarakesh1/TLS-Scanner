@@ -1,20 +1,19 @@
-The directory structure
 TLS-Scanner/
+├── checks/
+│   ├── certificates.py
+│   ├── protocols.py
+│   └── ciphers.py
 │
-|__ checks/                      
-│   |__ certificates.py          
-│   |__ protocols.py             
-│   |__ ciphers.py               
+├── core/
+│   ├── models.py
+│   ├── context.py
+│   ├── base_check.py
+│   └── scanner.py
 │
-|__ core/                        
-│   |__ models.py               
-│   |__ context.py               
-│   |__ base_check.py            
-│   |__ scanner.py      
-|
-|__ runners/                
-|   |__ sequential.py           
-|   |__ parallel.py     
-|__ benchmark.py
-|__ main.py
-|__requirements.txt
+├── runners/
+│   ├── sequential.py
+│   └── parallel.py
+│
+├── benchmark.py
+├── main.py
+└── requirements.txt
