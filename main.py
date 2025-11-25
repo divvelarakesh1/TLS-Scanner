@@ -6,6 +6,7 @@ from checks.certificates import DeepCertificateAnalysisCheck, DelegatedCredentia
 from checks.protocols import ProtocolSupportCheck
 from checks.ciphers import CipherConfigurationCheck, SessionTicketCheck
 from checks.attacks import ZombiePoodleCheck, TicketBleedCheck
+from checks.vulnerability import VulnerabilityCheck
 
 if __name__ == "__main__":
     config = ScannerConfig(connection_timeout=10.0, verify_certificates=False)
@@ -17,8 +18,9 @@ if __name__ == "__main__":
     scanner.register_check(DelegatedCredentialsCheck())
     scanner.register_check(SessionTicketCheck())
     scanner.register_check(ZombiePoodleCheck())
-    
-    target = ScanTarget(hostname="www.github.com", port=443)
+    scanner.register_check(VulnerabilityCheck())
+
+    target = ScanTarget(hostname="tls-attacker.de", port=443)
     
     print(f"[*] Scanning {target.hostname}:{target.port}...")
     result = scanner.scan(target)
