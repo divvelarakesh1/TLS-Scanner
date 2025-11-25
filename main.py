@@ -7,20 +7,35 @@ from checks.protocols import ProtocolSupportCheck
 from checks.ciphers import CipherConfigurationCheck, SessionTicketCheck
 from checks.attacks import ZombiePoodleCheck, TicketBleedCheck
 from checks.vulnerability import VulnerabilityCheck
+from checks.feature import AlpnCheck,TlsCompressionCheck,OcspStaplingCheck
 
 if __name__ == "__main__":
     config = ScannerConfig(connection_timeout=10.0, verify_certificates=False)
     scanner = TLSScannerCore(config)
     
-    scanner.register_check(DeepCertificateAnalysisCheck())
+    # The protocol checks
     scanner.register_check(ProtocolSupportCheck())
+    
+    #Ciphers.py
     scanner.register_check(CipherConfigurationCheck())
-    scanner.register_check(DelegatedCredentialsCheck())
     scanner.register_check(SessionTicketCheck())
-    scanner.register_check(ZombiePoodleCheck())
-    scanner.register_check(VulnerabilityCheck())
 
-    target = ScanTarget(hostname="tls-attacker.de", port=443)
+    #cerificates.py
+    scanner.register_check(DeepCertificateAnalysisCheck())
+    scanner.register_check(DelegatedCredentialsCheck())
+    
+    #attacks.py
+    scanner.register_check(ZombiePoodleCheck())
+    scanner.register_check(TicketBleedCheck())
+
+    #feature.py
+    scanner.register_check(AlpnCheck())
+    scanner.register_check(TlsCompressionCheck())
+    scanner.register_check(OcspStaplingCheck())
+
+    
+    target = ScanTarget(hostname="www.google.com", port=443)
+ 
     
     print(f"[*] Scanning {target.hostname}:{target.port}...")
     result = scanner.scan(target)
