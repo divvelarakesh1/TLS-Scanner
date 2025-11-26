@@ -16,27 +16,25 @@ if __name__ == "__main__":
     # The protocol checks
     scanner.register_check(ProtocolSupportCheck())
     
-    #Ciphers.py
+    #Ciphers checks
     scanner.register_check(CipherConfigurationCheck())
     scanner.register_check(SessionTicketCheck())
 
-    #cerificates.py
+    #cerificates checks
     scanner.register_check(DeepCertificateAnalysisCheck())
     scanner.register_check(DelegatedCredentialsCheck())
     
-    #attacks.py
+    #attacks checks
     scanner.register_check(ZombiePoodleCheck())
     scanner.register_check(TicketBleedCheck())
 
-    #vulnerability.py
-    scanner.register_check(VulnerabilityCheck())
-
-    #feature.py
+    #feature checks
     scanner.register_check(AlpnCheck())
     scanner.register_check(TlsCompressionCheck())
     scanner.register_check(OcspStaplingCheck())
 
-    
+    #vulnerability checks
+    scanner.register_check(VulnerabilityCheck())    
     target = ScanTarget(hostname="www.google.com", port=443)
  
     
