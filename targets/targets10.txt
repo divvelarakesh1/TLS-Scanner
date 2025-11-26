@@ -1,0 +1,10 @@
+apple.com
+microsoft.com
+amazon.com
+netflix.com
+github.com
+stackoverflow.com
+gitlab.com
+bitbucket.org
+cloudflare.com
+digitalocean.com
