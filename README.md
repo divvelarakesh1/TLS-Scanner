@@ -20,16 +20,13 @@ TLS-Scanner/
 └── requirements.txt
 ```
 
-```
+
 To build
 ```
 make build
-```
-```
-
 ```
 To run
 ```
 make run
 ```
-```
+
