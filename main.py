@@ -25,7 +25,6 @@ if __name__ == "__main__":
     scanner.register_check(DelegatedCredentialsCheck())
     
     #attacks checks
-    scanner.register_check(ZombiePoodleCheck())
     scanner.register_check(TicketBleedCheck())
 
     #feature checks
