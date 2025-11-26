@@ -28,6 +28,9 @@ if __name__ == "__main__":
     scanner.register_check(ZombiePoodleCheck())
     scanner.register_check(TicketBleedCheck())
 
+    #vulnerability.py
+    scanner.register_check(VulnerabilityCheck())
+
     #feature.py
     scanner.register_check(AlpnCheck())
     scanner.register_check(TlsCompressionCheck())
