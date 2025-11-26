@@ -4,6 +4,9 @@ TLS-Scanner/
 │   ├── certificates.py
 │   ├── protocols.py
 │   └── ciphers.py
+|   └── attacks.py
+|   └── features.py
+|   └── vulnerability.py
 │
 ├── core/
 │   ├── models.py
