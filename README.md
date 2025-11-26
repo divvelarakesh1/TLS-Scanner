@@ -19,3 +19,17 @@ TLS-Scanner/
 ├── main.py
 └── requirements.txt
 ```
+
+```
+To build
+```
+make build
+```
+```
+
+```
+To run
+```
+make run
+```
+```
