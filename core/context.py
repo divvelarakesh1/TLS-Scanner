@@ -13,18 +13,10 @@ class ConnectionContext:
     def __init__(self, target: ScanTarget, config: 'ScannerConfig'):
         self.target = target
         self.config = config
-
-    # -----------------------
-    # Socket creation
-    # -----------------------
     def create_socket(self, timeout: Optional[float] = None) -> socket.socket:
         timeout = timeout or self.config.connection_timeout
         sock = socket.create_connection((self.target.hostname, self.target.port), timeout=timeout)
         return sock
-
-    # -----------------------
-    # SSL Context with strong defaults
-    # -----------------------
     def create_ssl_context(self, **kwargs) -> ssl.SSLContext:
         ctx = ssl.SSLContext(kwargs.get("protocol", ssl.PROTOCOL_TLS_CLIENT))
         ctx.check_hostname = kwargs.get("check_hostname", False)
@@ -33,12 +25,10 @@ class ConnectionContext:
         if self.config.verify_certificates:
             ctx.load_default_certs()
 
-        # Strong defaults
         ctx.options |= ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3 | ssl.OP_NO_COMPRESSION
         
-        # Allow setting specific options
         if kwargs.get("allow_old_tls", False):
-            pass  # Don't disable old TLS for testing
+            pass
         else:
             ctx.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
 
@@ -50,9 +40,6 @@ class ConnectionContext:
             ctx.maximum_version = kwargs['maximum_version']
         return ctx
 
-    # -----------------------
-    # TLS handshake
-    # -----------------------
     def connect_tls(self, ssl_context: Optional[ssl.SSLContext] = None, timeout: Optional[float] = None) -> ssl.SSLSocket:
         timeout = timeout or self.config.connection_timeout
         sock = self.create_socket(timeout)
@@ -84,39 +71,26 @@ class ConnectionContext:
     def get_certificate_chain(self) -> List[Certificate]:
         chain: List[Certificate] = []
         try:
-            # Use the robust create_ssl_context method we already wrote
-            # We MUST enable verification or at least basic fetching to get the cert
             ctx = self.create_ssl_context()
-            
-            # We deliberately disable verification here to allow fetching 
-            # expired/self-signed certs for analysis
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
 
             with self.tls_connection(ctx) as ssl_sock:
-                # Get the raw binary certificate (DER format)
-                # This works even if the cert is expired/bad
                 der_cert = ssl_sock.getpeercert(binary_form=True)
                 
                 if der_cert:
-                    # Load into pyOpenSSL to reuse your existing parsing logic
                     x509 = crypto.load_certificate(crypto.FILETYPE_ASN1, der_cert)
                     parsed = self._parse_x509(x509)
                     if parsed:
                         chain.append(parsed)
                         
         except Exception as e:
-            # print(f"Debug: Cert fetch failed: {e}") # Uncomment to debug
             pass
             
         return chain
 
-    # -----------------------
-    # Parse OpenSSL X509 to Certificate
-    # -----------------------
     def _parse_x509(self, x509: crypto.X509) -> Optional[Certificate]:
         try:
-            # Helper to decode bytes or strings safely
             def decode_comp(comp):
                 return comp.decode('utf-8') if isinstance(comp, bytes) else str(comp)
 
@@ -124,7 +98,6 @@ class ConnectionContext:
             issuer = {decode_comp(entry[0]): decode_comp(entry[1]) for entry in x509.get_issuer().get_components()}
             serial_number = hex(x509.get_serial_number())
             
-            # Parse dates properly (OpenSSL returns bytes like b'20251027083351Z')
             not_before_str = x509.get_notBefore().decode('utf-8')
             not_after_str = x509.get_notAfter().decode('utf-8')
             
@@ -135,27 +108,23 @@ class ConnectionContext:
             pub_key = x509.get_pubkey()
             key_size = pub_key.bits()
             
-            # Determine Public Key Algorithm
             pk_type = pub_key.type()
             if pk_type == crypto.TYPE_RSA:
                 public_key_algorithm = "RSA"
             elif pk_type == crypto.TYPE_DSA:
                 public_key_algorithm = "DSA"
             else:
-                # Fallback or EC check might differ based on pyOpenSSL version
                 public_key_algorithm = "EC/Unknown"
 
             signature_algorithm = x509.get_signature_algorithm().decode('utf-8')
             fingerprint_sha256 = x509.digest("sha256").decode('utf-8')
 
-            # Parse SANs
             san = []
             ext_count = x509.get_extension_count()
             for i in range(ext_count):
                 ext = x509.get_extension(i)
                 if b"subjectAltName" in ext.get_short_name():
                     san_str = str(ext)
-                    # Clean up the SAN string (e.g., "DNS:example.com, DNS:www.example.com")
                     san = [x.strip().replace("DNS:", "") for x in san_str.split(",")]
             
             pem = crypto.dump_certificate(crypto.FILETYPE_PEM, x509).decode('utf-8')
@@ -176,39 +145,25 @@ class ConnectionContext:
         except Exception:
             return None
 
-    # -----------------------
-    # Test cipher suite
-    # -----------------------
     def test_cipher_suite(self, cipher: str, protocol: Optional[ssl.TLSVersion] = None) -> bool:
         try:
             ctx = self.create_ssl_context(ciphers=cipher, allow_old_tls=True)
             if protocol:
                 ctx.minimum_version = protocol
                 ctx.maximum_version = protocol
-            # Explicitly allow old protocols
             ctx.options &= ~ssl.OP_NO_SSLv3
             ctx.options &= ~ssl.OP_NO_TLSv1
             ctx.options &= ~ssl.OP_NO_TLSv1_1
-            # CHANGE: Capture the socket as 'ssl_sock'
             with self.tls_connection(ctx) as ssl_sock:
-                # Ask: "What cipher are we ACTUALLY using?"
                 negotiated = ssl_sock.cipher()[0]
-                # If we asked for NULL/aNULL, verify we got it
                 if cipher in ["NULL", "aNULL"]:
                     if "NULL" not in negotiated:
-                        return False # OS upgraded us to strong encryption            
-                # If we asked for a specific string (e.g. "RC4"), verify it's in the name
-                # Exception: "kRSA" is a mechanism, not a name, so we skip name check for it
+                        return False
                 elif cipher != "kRSA" and cipher not in negotiated:
-                    return False # OS upgraded us to AES/Chacha
-                
+                    return False 
                 return True
         except Exception:
             return False
-
-    # -----------------------
-    # Test protocol version
-    # -----------------------
     def test_protocol_version(self, protocol: ssl.TLSVersion) -> bool:
         try:
             ctx = self.create_ssl_context(minimum_version=protocol, maximum_version=protocol, allow_old_tls=True)
@@ -217,9 +172,6 @@ class ConnectionContext:
         except Exception:
             return False
 
-    # -----------------------
-    # Get negotiated cipher
-    # -----------------------
     def get_negotiated_cipher(self) -> Optional[str]:
         """Get the cipher suite negotiated in a connection"""
         try:
@@ -228,9 +180,6 @@ class ConnectionContext:
         except Exception:
             return None
 
-    # -----------------------
-    # Get negotiated protocol
-    # -----------------------
     def get_negotiated_protocol(self) -> Optional[str]:
         """Get the TLS protocol version negotiated"""
         try:
@@ -239,9 +188,6 @@ class ConnectionContext:
         except Exception:
             return None
 
-    # -----------------------
-    # STARTTLS support
-    # -----------------------
     def starttls_upgrade(self) -> socket.socket:
         if not self.target.starttls_protocol:
             raise ValueError("No STARTTLS protocol specified")
@@ -251,7 +197,7 @@ class ConnectionContext:
         
         try:
             if protocol == "smtp":
-                sock.recv(1024)  # Read banner
+                sock.recv(1024)
                 sock.sendall(b"EHLO scanner.local\r\n")
                 sock.recv(4096)
                 sock.sendall(b"STARTTLS\r\n")
@@ -259,7 +205,7 @@ class ConnectionContext:
                 if not response.startswith(b"220"):
                     raise RuntimeError(f"STARTTLS failed: {response}")
             elif protocol == "imap":
-                sock.recv(1024)  # Read banner
+                sock.recv(1024)
                 sock.sendall(b"A001 STARTTLS\r\n")
                 response = sock.recv(4096)
                 if b"OK" not in response:
