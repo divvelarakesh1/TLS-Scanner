@@ -16,16 +16,14 @@ class DeepCertificateAnalysisCheck(BaseCheck):
     def run(self, context: ConnectionContext) -> List[Finding]:
         findings = []
 
-        # ----------------------------------------
-        # Fetch certificate chain
-        # ----------------------------------------
+        
         chain = context.get_certificate_chain()
         if not chain:
             return findings
         
-        # Leaf Certificate on the chain
+        
         cert = chain[0]
-        # Check 1: Certificate Status
+        #  Certificate Status
         if cert.is_expired:
             findings.append(
                 self.create_finding(
@@ -56,7 +54,7 @@ class DeepCertificateAnalysisCheck(BaseCheck):
                 )
             )
 
-        # Check 2: Hostname Validation
+        #  Hostname Validation
         hostname = context.target.effective_sni
         sanList = cert.san
         cn = cert.subject.get("CN", "")
@@ -86,7 +84,7 @@ class DeepCertificateAnalysisCheck(BaseCheck):
                 )
             )
 
-        # Check 3: Trust Chain / Self-signed Detection
+        #  Trust Chain / Self-signed Detection
         if cert.subject == cert.issuer:
             findings.append(
                 self.create_finding(
@@ -97,7 +95,7 @@ class DeepCertificateAnalysisCheck(BaseCheck):
                 )
             )
 
-        # Check 4: Weak Signature Algorithm
+        #  Weak Signature Algorithm
         algo = cert.signature_algorithm.lower()
         
         if "md5" in algo or "md2" in algo:
@@ -119,7 +117,7 @@ class DeepCertificateAnalysisCheck(BaseCheck):
                 )
             )
 
-        # Check 5: Weak Key Strength
+        #  Weak Key Strength
         if cert.public_key_algorithm == "RSA":
             if cert.key_size < 1024:
                 findings.append(
@@ -165,7 +163,7 @@ class DelegatedCredentialsCheck(BaseCheck):
     def run(self, context: ConnectionContext) -> List[Finding]:
         findings = []
         
-        # Check 1: Basic DC support
+        #  Basic DC support
         if not context.supports_delegated_credentials():
             findings.append(self.create_finding(
                 severity=Severity.INFO,
@@ -175,7 +173,7 @@ class DelegatedCredentialsCheck(BaseCheck):
             ))
             return findings
         
-        # Check 2: Get detailed DC information
+        #  Get detailed DC information
         dc_info = context.test_dc_with_openssl()
         if not dc_info or not dc_info.get("supported", False):
             findings.append(self.create_finding(
@@ -185,10 +183,10 @@ class DelegatedCredentialsCheck(BaseCheck):
             ))
             return findings
         
-        # Check 3: DC Validity Period Analysis
+        #  DC Validity Period Analysis
         self._check_dc_validity(findings, dc_info)
         
-        # Check 4: Weak Signature Algorithms
+        #  Weak Signature Algorithms
         self._check_dc_algorithms(findings, dc_info)
         
         
