@@ -17,10 +17,21 @@ TLS-Scanner/
 ├── runners/
 │   ├── sequential.py
 │   └── parallel.py
-│
+|
+├── targets/
+│   ├── targets1.txt
+│   └── targets5.txt
+|   └── targets10.txt
+|   └── targets20.txt
+|   └── targets50.txt
+|
 ├── benchmark.py
 ├── main.py
 └── requirements.txt
+├── Dockerfile
+└── targets.txt
+└── Makefile
+└── Readme.md
 ```
 
 
