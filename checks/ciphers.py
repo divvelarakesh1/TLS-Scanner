@@ -8,25 +8,25 @@ from core.context import ConnectionContext
 
 class CipherConfigurationCheck(BaseCheck):
     """
-    Checks for weak or misconfigured cipher suites, including:
-    - Legacy Ciphers (RC4, 3DES, NULL)
-    - Forward Secrecy support (Static RSA detection)
-    - Anonymous authentication (Man-in-the-Middle risk)
+    This  class includes the functions of the following checks
+    Weak Ciphers (RC4, 3DES, NULL)
+    Forward Secrecy support (Static RSA detection)
+    Anonymous authentication (Man-in-the-Middle risk)
     """  
     def run(self, context: ConnectionContext) -> List[Finding]:
         findings = []
         weak_targets = [
-            ("NULL", "NULL", Severity.CRITICAL),      # No encryption
-            ("ADH", "ADH", Severity.CRITICAL),        # Anonymous DH (No Authentication)
-            ("AECDH", "AECDH", Severity.CRITICAL),    # Anonymous ECDH (No Authentication)
-            ("EXPORT", "EXP", Severity.CRITICAL),     # Export-grade (40-bit keys, trivially breakable)
-            ("RC4", "RC4", Severity.HIGH),            # Biased stream cipher (broken)
-            ("RC2", "RC2", Severity.HIGH),            # Ancient block cipher
-            ("DES", "DES", Severity.HIGH),            # Single DES (56-bit, broken)
-            ("3DES", "3DES", Severity.MEDIUM),        # Triple-DES (Sweet32 vulnerability, slow)
-            ("SEED", "SEED", Severity.MEDIUM),        # Old Korean cipher (deprecated)
-            ("IDEA", "IDEA", Severity.MEDIUM),        # Old cipher (deprecated)
-            ("CAMELLIA", "CAMELLIA", Severity.MEDIUM),# Not strictly broken, but rare/non-standard now
+            ("NULL", "NULL", Severity.CRITICAL),      
+            ("ADH", "ADH", Severity.CRITICAL),        
+            ("AECDH", "AECDH", Severity.CRITICAL),    
+            ("EXPORT", "EXP", Severity.CRITICAL),     
+            ("RC4", "RC4", Severity.HIGH),            
+            ("RC2", "RC2", Severity.HIGH),            
+            ("DES", "DES", Severity.HIGH),            
+            ("3DES", "3DES", Severity.MEDIUM),        
+            ("SEED", "SEED", Severity.MEDIUM),       
+            ("IDEA", "IDEA", Severity.MEDIUM),        
+            ("CAMELLIA", "CAMELLIA", Severity.MEDIUM),
         ]
         for name, cipher_str, severity in weak_targets:
             if context.test_cipher_suite(cipher_str):
@@ -37,7 +37,7 @@ class CipherConfigurationCheck(BaseCheck):
                     remediation=f"Disable {name} in the server configuration.",
                     metadata={"cipher_string": cipher_str}
                 ))
-        # 2. Static RSA (No Forward Secrecy)
+        # Static RSA (No Forward Secrecy)
         # "kRSA" in OpenSSL selects cipher suites using Static RSA Key Exchange
         if context.test_cipher_suite("kRSA"):
              findings.append(self.create_finding(
@@ -47,7 +47,7 @@ class CipherConfigurationCheck(BaseCheck):
                 remediation="Prioritize ECDHE or DHE cipher suites.",
                 metadata={"cipher_string": "kRSA"}
             ))
-        # 3. Anonymous Ciphers (aNULL)
+        # Anonymous Ciphers (aNULL)
         # Encryption without authentication
         if context.test_cipher_suite("aNULL"):
              findings.append(self.create_finding(
@@ -61,10 +61,10 @@ class CipherConfigurationCheck(BaseCheck):
 
 class SessionTicketCheck(BaseCheck):
     """
-    Checks for Session Ticket Encryption Key (STEK) misuse:
-    1. Excessive Ticket Lifetimes (Keys not rotated frequently).
-    2. Static Tickets (Lack of entropy/IV reuse).
-    3. Support verification (RFC 5077/8446).
+     This  class includes the functions of the following checks
+     Excessive Ticket Lifetimes (Keys not rotated frequently)
+     Static Tickets (Lack of entropy).
+     Support verification (RFC 5077/8446).
     """
     
     def run(self, context: ConnectionContext) -> List[Finding]:
@@ -115,17 +115,17 @@ class SessionTicketCheck(BaseCheck):
         
         ticket_info_2 = self._analyze_ticket(context)
         
-        blob1 = ticket_info_1.get("ticket_hex", "")
-        blob2 = ticket_info_2.get("ticket_hex", "")
+        b1 = ticket_info_1.get("ticket_hex", "")
+        b2 = ticket_info_2.get("ticket_hex", "")
         
-        if blob1 and blob2 and blob1 == blob2:
+        if b1 and b2 and b1 == b2:
             findings.append(self.create_finding(
                 severity=Severity.HIGH,
                 title="Static Session Tickets Detected (Lack of Entropy)",
                 description="Server issued the exact same session ticket binary for two separate connections. This indicates a static IV or broken STEK implementation.",
                 remediation="Ensure TLS software generates unique tickets per connection using random IVs.",
             ))
-        elif blob1 and blob2:
+        elif b1 and b2:
              findings.append(self.create_finding(
                 severity=Severity.INFO,
                 title="Session Tickets are Randomized",
