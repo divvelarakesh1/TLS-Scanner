@@ -45,7 +45,7 @@ class ProtocolSupportCheck(BaseCheck):
 
         supported_legacy: List[str] = []
 
-        # Check 1: Probe protocol support
+        # Probe protocol support
         for name, tls_const, openssl_flag in self._protocols:
             supported = False
 
@@ -91,7 +91,7 @@ class ProtocolSupportCheck(BaseCheck):
                     )
                 )
 
-        # Check 2: Fallback SCSV detection
+        #  Fallback SCSV detection
         scsv_result = self._detect_fallback_scsv(
             context.target.hostname, context.target.port, supported_legacy
         )
@@ -179,7 +179,7 @@ class ProtocolSupportCheck(BaseCheck):
     def _detect_fallback_scsv(self, host: str, port: int, supported_legacy: List[str]) -> Optional[Union[bool, str]]:
         """
         Return:
-          True  -> server REJECTED the connection when -fallback_scsv was present (good)
+          True  -> server REJECTED the connection when -fallback_scsv was present 
           False -> server accepted even with -fallback_scsv (bad)
           "not_applicable" -> No legacy protocols to test
           None  -> indeterminate (openssl missing / both fail / timeout)
@@ -275,8 +275,8 @@ class ProtocolSupportCheck(BaseCheck):
                 "cipher is",
                 "ssl handshake has read",
                 "new, ",
-                "verification: ok",           # New OpenSSL 3.0 success indicator
-                "cipher:",                    # New OpenSSL 3.0 format
+                "verification: ok",           
+                "cipher:",                    
                 "certificate chain",
             ]
             for indicator in success_indicators:
