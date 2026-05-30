@@ -133,39 +133,28 @@ def exp_timeouts():
 # EXPERIMENT 4: Industry Comparison
 # ==========================================
 def exp_competitor():
-    if not shutil.which("sslyze"):
-        print("\n[!] Skipping Exp 4: 'sslyze' not installed.")
-        return
+    print("\n[1/4] Running Scalability Benchmark (Seq vs Par)...")
+    target_counts = [1,5, 10, 20,50,100] 
+    par_times = []
 
-    print("\n[4/4] Running Industry Comparison (Vs SSLyze)...")
-    n_targets = 3
-    targets = generate_targets(n_targets)
-
-    # My Scanner
-    print("   Running Our Scanner...")
-    s = time.time()
-    parallel.run_scan(targets, pool_size=5)
-    t_mine = time.time() - s
-
-    # SSLyze
-    print("   Running SSLyze...")
-    t_sslyze = run_sslyze_scan(targets)
+    for n in target_counts:
+        print(f"   Testing N={n} targets...")
+        targets = generate_targets(n)        
+        # Parallel (Fixed 10 workers)
+        s = time.time()
+        parallel.run_scan(targets, pool_size=10)
+        par_times.append(time.time() - s)
 
     # Plot
-    plt.figure(figsize=(8, 6))
-    labels = ['Our Scanner', 'SSLyze']
-    values = [t_mine, t_sslyze]
-    plt.bar(labels, values, color=['#90EE90', '#D3D3D3'])
-    plt.title(f'Head-to-Head: Scanning {n_targets} Hosts')
+    plt.figure(figsize=(10, 6))
+    plt.plot(target_counts, par_times, 'g-o', label='Parallel (O(1))')
+    plt.title('Scalability: Execution Time vs Load')
+    plt.xlabel('Number of Targets')
     plt.ylabel('Time (seconds)')
-    
-    if t_mine > 0:
-        speedup = t_sslyze / t_mine
-        plt.figtext(0.5, 0.8, f"{speedup:.1f}x Faster", ha="center", fontsize=14, color="green", weight="bold")
-    
-    plt.savefig(f"{GRAPH_DIR}/benchmark_4_competitor.png")
-    print("   -> Saved benchmark_4_competitor.png")
-
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(f"{GRAPH_DIR}/benchmark_4_scaling.png")
+    print("   -> Saved benchmark_5_scaling.png")
 if __name__ == "__main__":
     print("========================================")
     print("   STARTING COMPREHENSIVE BENCHMARK     ")
